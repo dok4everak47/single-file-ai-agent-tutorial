@@ -14,42 +14,51 @@ from typing import List, Dict, Any
 from anthropic import Anthropic  # type: ignore
 from pydantic import BaseModel  # type: ignore
 
-# Set up logging
+# 设置日志记录
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(message)s",
     handlers=[logging.FileHandler("agent.log")],
 )
 
-# Suppress verbose HTTP logs
+# 抑制详细的HTTP日志
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class Tool(BaseModel):
-    name: str
-    description: str
-    input_schema: Dict[str, Any]
+    """工具类，定义AI代理可以使用的工具"""
+    name: str  # 工具名称
+    description: str  # 工具描述
+    input_schema: Dict[str, Any]  # 工具输入模式
 
 
 class AIAgent:
+    """AI代理类，负责与Claude API交互和执行工具操作"""
+    
     def __init__(self, api_key: str):
-        self.client = Anthropic(api_key=api_key)
-        self.messages: List[Dict[str, Any]] = []
-        self.tools: List[Tool] = []
-        self._setup_tools()
+        """初始化AI代理
+        
+        Args:
+            api_key: Anthropic API密钥
+        """
+        self.client = Anthropic(api_key=api_key)  # 创建Anthropic客户端
+        self.messages: List[Dict[str, Any]] = []  # 存储对话历史
+        self.tools: List[Tool] = []  # 可用工具列表
+        self._setup_tools()  # 设置工具
 
     def _setup_tools(self):
+        """设置可用的工具列表"""
         self.tools = [
             Tool(
                 name="read_file",
-                description="Read the contents of a file at the specified path",
+                description="读取指定路径文件的内容",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "The path to the file to read",
+                            "description": "要读取的文件路径",
                         }
                     },
                     "required": ["path"],
@@ -57,13 +66,13 @@ class AIAgent:
             ),
             Tool(
                 name="list_files",
-                description="List all files and directories in the specified path",
+                description="列出指定路径中的所有文件和目录",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "The directory path to list (defaults to current directory)",
+                            "description": "要列出的目录路径（默认为当前目录）",
                         }
                     },
                     "required": [],
@@ -71,21 +80,21 @@ class AIAgent:
             ),
             Tool(
                 name="edit_file",
-                description="Edit a file by replacing old_text with new_text. Creates the file if it doesn't exist.",
+                description="通过将old_text替换为new_text来编辑文件。如果文件不存在则创建新文件。",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "The path to the file to edit",
+                            "description": "要编辑的文件路径",
                         },
                         "old_text": {
                             "type": "string",
-                            "description": "The text to search for and replace (leave empty to create new file)",
+                            "description": "要搜索并替换的文本（留空以创建新文件）",
                         },
                         "new_text": {
                             "type": "string",
-                            "description": "The text to replace old_text with",
+                            "description": "用于替换old_text的文本",
                         },
                     },
                     "required": ["path", "new_text"],
@@ -94,7 +103,16 @@ class AIAgent:
         ]
 
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
-        logging.info(f"Executing tool: {tool_name} with input: {tool_input}")
+        """执行指定的工具
+        
+        Args:
+            tool_name: 工具名称
+            tool_input: 工具输入参数
+            
+        Returns:
+            工具执行结果
+        """
+        logging.info(f"执行工具: {tool_name} 输入: {tool_input}")
         try:
             if tool_name == "read_file":
                 return self._read_file(tool_input["path"])
@@ -107,58 +125,86 @@ class AIAgent:
                     tool_input["new_text"],
                 )
             else:
-                return f"Unknown tool: {tool_name}"
+                return f"未知工具: {tool_name}"
         except Exception as e:
-            logging.error(f"Error executing {tool_name}: {str(e)}")
-            return f"Error executing {tool_name}: {str(e)}"
+            logging.error(f"执行 {tool_name} 时出错: {str(e)}")
+            return f"执行 {tool_name} 时出错: {str(e)}"
 
     def _read_file(self, path: str) -> str:
+        """读取文件内容
+        
+        Args:
+            path: 文件路径
+            
+        Returns:
+            文件内容或错误信息
+        """
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
-            return f"File contents of {path}:\n{content}"
+            return f"文件 {path} 的内容:\n{content}"
         except FileNotFoundError:
-            return f"File not found: {path}"
+            return f"文件未找到: {path}"
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            return f"读取文件时出错: {str(e)}"
 
     def _list_files(self, path: str) -> str:
+        """列出目录中的文件和文件夹
+        
+        Args:
+            path: 目录路径
+            
+        Returns:
+            目录内容列表或错误信息
+        """
         try:
             if not os.path.exists(path):
-                return f"Path not found: {path}"
+                return f"路径未找到: {path}"
 
             items = []
             for item in sorted(os.listdir(path)):
                 item_path = os.path.join(path, item)
                 if os.path.isdir(item_path):
-                    items.append(f"[DIR]  {item}/")
+                    items.append(f"[目录]  {item}/")
                 else:
-                    items.append(f"[FILE] {item}")
+                    items.append(f"[文件] {item}")
 
             if not items:
-                return f"Empty directory: {path}"
+                return f"空目录: {path}"
 
-            return f"Contents of {path}:\n" + "\n".join(items)
+            return f"{path} 的内容:\n" + "\n".join(items)
         except Exception as e:
-            return f"Error listing files: {str(e)}"
+            return f"列出文件时出错: {str(e)}"
 
     def _edit_file(self, path: str, old_text: str, new_text: str) -> str:
+        """编辑文件内容
+        
+        Args:
+            path: 文件路径
+            old_text: 要替换的旧文本
+            new_text: 替换的新文本
+            
+        Returns:
+            操作结果信息
+        """
         try:
             if os.path.exists(path) and old_text:
+                # 文件存在且有旧文本，执行替换操作
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
 
                 if old_text not in content:
-                    return f"Text not found in file: {old_text}"
+                    return f"文件中未找到文本: {old_text}"
 
                 content = content.replace(old_text, new_text)
 
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
 
-                return f"Successfully edited {path}"
+                return f"成功编辑 {path}"
             else:
-                # Only create directory if path contains subdirectories
+                # 文件不存在或没有旧文本，创建新文件
+                # 如果路径包含子目录，则创建目录
                 dir_name = os.path.dirname(path)
                 if dir_name:
                     os.makedirs(dir_name, exist_ok=True)
@@ -166,14 +212,23 @@ class AIAgent:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(new_text)
 
-                return f"Successfully created {path}"
+                return f"成功创建 {path}"
         except Exception as e:
-            return f"Error editing file: {str(e)}"
+            return f"编辑文件时出错: {str(e)}"
 
     def chat(self, user_input: str) -> str:
-        logging.info(f"User input: {user_input}")
+        """与AI代理进行对话
+        
+        Args:
+            user_input: 用户输入
+            
+        Returns:
+            AI代理的回复
+        """
+        logging.info(f"用户输入: {user_input}")
         self.messages.append({"role": "user", "content": user_input})
 
+        # 准备工具模式供API使用
         tool_schemas = [
             {
                 "name": tool.name,
@@ -185,14 +240,16 @@ class AIAgent:
 
         while True:
             try:
+                # 调用Claude API
                 response = self.client.messages.create(
                     model="claude-sonnet-4-5-20250929",
                     max_tokens=4096,
-                    system="You are a helpful coding assistant operating in a terminal environment. Output only plain text without markdown formatting, as your responses appear directly in the terminal. Be concise but thorough, providing clear and practical advice with a friendly tone. Don't use any asterisk characters in your responses.",
+                    system="你是一个在终端环境中运行的乐于助人的编程助手。只输出纯文本，不要使用markdown格式，因为你的回复会直接显示在终端中。要简洁但全面，以友好的语气提供清晰实用的建议。不要在回复中使用任何星号字符。",
                     messages=self.messages,
                     tools=tool_schemas,
                 )
 
+                # 处理API响应
                 assistant_message = {"role": "assistant", "content": []}
 
                 for content in response.content:
@@ -212,13 +269,14 @@ class AIAgent:
 
                 self.messages.append(assistant_message)
 
+                # 执行工具调用
                 tool_results = []
                 for content in response.content:
                     if content.type == "tool_use":
                         result = self._execute_tool(content.name, content.input)
                         logging.info(
-                            f"Tool result: {result[:500]}..."
-                        )  # Log first 500 chars
+                            f"工具结果: {result[:500]}..."
+                        )  # 记录前500个字符
                         tool_results.append(
                             {
                                 "type": "tool_result",
@@ -227,60 +285,66 @@ class AIAgent:
                             }
                         )
 
+                # 如果有工具结果，继续对话
                 if tool_results:
                     self.messages.append({"role": "user", "content": tool_results})
                 else:
+                    # 没有工具调用，返回最终回复
                     return response.content[0].text if response.content else ""
 
             except Exception as e:
-                return f"Error: {str(e)}"
+                return f"错误: {str(e)}"
 
 
 def main():
+    """主函数，程序入口点"""
     parser = argparse.ArgumentParser(
-        description="AI Code Assistant - A conversational AI agent with file editing capabilities"
+        description="AI代码助手 - 具有文件编辑功能的对话式AI代理"
     )
     parser.add_argument(
-        "--api-key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)"
+        "--api-key", help="Anthropic API密钥（或设置ANTHROPIC_API_KEY环境变量）"
     )
     args = parser.parse_args()
 
+    # 获取API密钥（命令行参数或环境变量）
     api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         print(
-            "Error: Please provide an API key via --api-key or ANTHROPIC_API_KEY environment variable"
+            "错误: 请通过--api-key参数或ANTHROPIC_API_KEY环境变量提供API密钥"
         )
         sys.exit(1)
 
+    # 创建AI代理实例
     agent = AIAgent(api_key)
 
-    print("AI Code Assistant")
+    print("AI代码助手")
     print("================")
-    print("A conversational AI agent that can read, list, and edit files.")
-    print("Type 'exit' or 'quit' to end the conversation.")
+    print("一个可以读取、列出和编辑文件的对话式AI代理。")
+    print("输入'exit'或'quit'结束对话。")
     print()
 
+    # 主对话循环
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input("你: ").strip()
 
             if user_input.lower() in ["exit", "quit"]:
-                print("Goodbye!")
+                print("再见！")
                 break
 
             if not user_input:
                 continue
 
-            print("\nAssistant: ", end="", flush=True)
+            print("\n助手: ", end="", flush=True)
             response = agent.chat(user_input)
             print(response)
             print()
 
         except KeyboardInterrupt:
-            print("\n\nGoodbye!")
+            print("\n\n再见！")
             break
         except Exception as e:
-            print(f"\nError: {str(e)}")
+            print(f"\n错误: {str(e)}")
             print()
 
 
